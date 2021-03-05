@@ -1,5 +1,6 @@
 import 'package:app_boilerplate/screens/tabs/todos/active.dart';
 import 'package:app_boilerplate/screens/tabs/todos/all.dart';
+import 'package:app_boilerplate/screens/tabs/todos/completed.dart';
 import 'package:flutter/material.dart';
 
 class Todos extends StatefulWidget {
@@ -33,6 +34,7 @@ class _TodosState extends State<Todos> {
           children: [
             All(),
             Active(),
+            Completed(),
           ],
         ),
       ),
