@@ -1,5 +1,6 @@
 import 'package:app_boilerplate/components/custom_button.dart';
 import 'package:app_boilerplate/components/feed_tile.dart';
+import 'package:app_boilerplate/data/feed_fetch.dart';
 import 'package:app_boilerplate/data/feed_list.dart';
 import 'package:flutter/material.dart';
 import 'package:graphql_flutter/graphql_flutter.dart';
@@ -12,15 +13,13 @@ class Feeds extends StatefulWidget {
 }
 
 class _FeedsState extends State<Feeds> {
+  TextEditingController _controller = TextEditingController();
   static int _lastLatestFeedId;
   static int _oldestFeedId;
   static int _newTodoCount = 0;
   static int _previousId = 0;
   static int _newId = 0;
   GraphQLClient _client;
-  TextEditingController _controller = TextEditingController();
-
-  @override
   void initState() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _client = GraphQLProvider.of(context).value;
@@ -33,58 +32,141 @@ class _FeedsState extends State<Feeds> {
     print("All tab");
     return Column(
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.all(18.0),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Expanded(
-                child: TextFormField(
-                  controller: _controller,
-                  decoration: InputDecoration(
-                    labelText: "Say something ...",
-                    border: OutlineInputBorder(),
+        Mutation(
+            options:
+                MutationOptions(documentNode: gql(FeedFetch.addPublicTodo)),
+            builder: (
+              RunMutation runMutation,
+              QueryResult result,
+            ) {
+              return Padding(
+                padding: const EdgeInsets.all(18.0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Expanded(
+                      child: TextFormField(
+                        controller: _controller,
+                        decoration: InputDecoration(
+                          labelText: "Say something ...",
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: CustomButton(
+                        width: 90,
+                        height: 50,
+                        onTap: () {
+                          runMutation({"title": _controller.text});
+                          _controller.clear();
+                          FocusScope.of(context).requestFocus(new FocusNode());
+                        },
+                        text: "Post",
+                      ),
+                    )
+                  ],
+                ),
+              );
+            }),
+        Subscription(
+          "fetchNewNotification",
+          FeedFetch.fetchNewNotification,
+          builder: ({
+            bool loading,
+            dynamic payload,
+            dynamic error,
+          }) {
+            if (error != null) {
+              print('Error -----> $error');
+            }
+            if (payload != null) {
+              _newId = payload['todos'][0]['id'];
+              if (_previousId != 0) {
+                _newTodoCount = _newTodoCount + (_newId - _previousId);
+              } else {
+                _lastLatestFeedId = _newId;
+                _client
+                    .query(
+                  QueryOptions(
+                    documentNode: gql(FeedFetch.loadMoreTodos),
+                    variables: {"oldestTodoId": _newId + 1},
                   ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: CustomButton(
-                  width: 90,
-                  height: 50,
+                )
+                    .then((onValue) {
+                  for (var todo in onValue.data.data['todos']) {
+                    feedList.addFeed(todo['id'].toString(), todo['title'],
+                        todo['user']['name']);
+                  }
+                  setState(() {});
+                }).catchError((onError) {
+                  print(onError);
+                });
+              }
+              _previousId = payload['todos'][0]['id'];
+              if (_newTodoCount != 0) {
+                return CustomButton(
                   onTap: () {
-                    feedList.addFeed("", "You", _controller.text);
-                    _controller.clear();
-                    FocusScope.of(context).requestFocus(new FocusNode());
+                    _client
+                        .query(
+                      QueryOptions(
+                        documentNode: gql(FeedFetch.newTodos),
+                        variables: {"latestVisibleId": _lastLatestFeedId},
+                      ),
+                    )
+                        .then((onValue) {
+                      for (var todo in onValue.data.data['todos'].reversed) {
+                        feedList.addfirstFeed(todo['id'].toString(),
+                            todo['title'], todo['user']['name']);
+                      }
+                      _lastLatestFeedId = int.parse(feedList.list.first.id);
+                      _newTodoCount = 0;
+                      setState(() {});
+                    }).catchError((onError) {
+                      print(onError);
+                    });
                   },
-                  text: "Post",
-                ),
-              )
-            ],
-          ),
-        ),
-        CustomButton(
-          onTap: () {
-            print("loading");
+                  height: 50,
+                  text: "New Notification",
+                  width: MediaQuery.of(context).size.width / 2,
+                );
+              } else
+                return SizedBox();
+            } else {
+              return SizedBox();
+            }
           },
-          height: 50,
-          text: "New Notification",
-          width: MediaQuery.of(context).size.width / 2,
         ),
         Expanded(
           child: ListView.builder(
             itemCount: feedList.list.length,
             itemBuilder: (context, index) {
               return FeedTile(
-                  username:
-                      feedList.list[feedList.list.length - index - 1].username,
-                  feed: feedList.list[feedList.list.length - index - 1].feed);
+                  username: feedList.list[index].username,
+                  feed: feedList.list[index].feed);
             },
           ),
         ),
         CustomButton(
           onTap: () {
-            print("load more");
+            _oldestFeedId = int.parse(feedList.list.last.id);
+            _client
+                .query(
+              QueryOptions(
+                documentNode: gql(FeedFetch.loadMoreTodos),
+                variables: {"oldestTodoId": _oldestFeedId},
+              ),
+            )
+                .then((onValue) {
+              for (var todo in onValue.data.data['todos']) {
+                feedList.addFeed(
+                    todo['id'].toString(), todo['title'], todo['user']['name']);
+              }
+              setState(() {});
+            }).catchError((onError) {
+              print(onError);
+            });
           },
           height: 50,
           text: "Load More",
